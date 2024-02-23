@@ -148,6 +148,7 @@ class Doraemon:
         kl_bound: float,
         target_success_rate: float,
     ):
+        self.n_traj = 0
         self.k = k
         self.kl_bound = kl_bound
         self.dist = dist
@@ -155,6 +156,7 @@ class Doraemon:
         self.buffer: Deque[Trajectory] = deque(maxlen=k)
 
     def add_trajectory(self, params: List[float], successful: bool):
+        self.n_traj += 1
         self.buffer.append(Trajectory(params, successful))
 
     def _estimate_success(self, cand: MultivariateGaussianDistribution) -> float:
@@ -203,6 +205,9 @@ class Doraemon:
         # Implement "Dynamics distribution update" of Algorithm 1 lines 7-14,
         # updating self.dist in-place
         if len(self.buffer) < self.k:
+            return
+
+        if self.n_traj % self.k != 0:
             return
 
         if np.mean([t.successful for t in self.buffer]) < self.target_success_rate:
