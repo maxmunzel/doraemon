@@ -14,15 +14,18 @@ def __():
     from scipy.optimize import minimize, NonlinearConstraint
     from collections import deque
     from copy import deepcopy
+    from scipy.stats import beta, norm
     return (
         Deque,
         List,
         NamedTuple,
         NonlinearConstraint,
         Protocol,
+        beta,
         deepcopy,
         deque,
         minimize,
+        norm,
         np,
         numpy,
         plt,
@@ -31,10 +34,7 @@ def __():
 
 
 @app.cell
-def __(Dict, List, deepcopy, np):
-    from scipy.stats import norm
-
-
+def __(Dict, List, deepcopy, norm, np):
     class MultivariateGaussianDistribution:
         def __init__(
             self, stds: List[float], names: List[str], means=None, seed=42
@@ -111,7 +111,76 @@ def __(Dict, List, deepcopy, np):
             kl_div /= 2
 
             return kl_div
-    return MultivariateGaussianDistribution, norm
+    return MultivariateGaussianDistribution,
+
+
+@app.cell
+def __(Dict, List, beta, deepcopy, np):
+    class MultivariateBetaDistribution:
+        def __init__(
+            self,
+            alphas: List[float],
+            low: List[float],
+            high: List[float],
+            names: List[str],
+            seed=42,
+        ):
+            self.low = np.array(low)
+            self.high = np.array(high)
+            self.alphas = np.array(alphas)
+            self.betas = self.alphas  # Since alpha == beta
+            self.names = names
+            assert len(alphas) == len(names) == len(low) == len(high)
+            self.random = np.random.default_rng(seed)
+
+        def with_params(self, alphas: List[float], seed=42):
+            assert len(alphas) == len(self.alphas)
+            res = deepcopy(self)
+            res.set_params(alphas)
+            return res
+
+        def sample(self) -> np.ndarray:
+            low = self.low
+            high = self.high
+
+            samples = np.array(
+                [self.random.beta(a, b) for a, b in zip(self.alphas, self.betas)]
+            )
+
+            return low + (high - low) * samples
+
+        def sample_dict(self) -> Dict[str, float]:
+            return {name: value for name, value in zip(self.names, self.sample())}
+
+        def likelihood(self, sample: List[float]) -> float:
+            high = self.high
+            low = self.low
+            sample = (sample - low) / (high - low)
+            likelihoods = [
+                beta.pdf(x, a, b)
+                for x, a, b in zip(sample, self.alphas, self.betas)
+            ]
+            return np.prod(likelihoods)
+
+        def entropy(self) -> float:
+            entropies = [
+                beta.entropy(a, b) for a, b in zip(self.alphas, self.betas)
+            ]
+            return np.sum(entropies)
+
+        def kl_dist(self, other) -> float:
+            # TODO: find an actual way to compute this
+            return np.linalg.norm(self.get_params() - other.get_params())
+
+        def get_params(self) -> np.ndarray:
+            return self.alphas.copy()
+
+        def set_params(self, alphas: List[float]):
+            self.alphas = np.array(alphas)
+            self.betas = np.array(
+                alphas
+            )  # Update betas as well since alpha == beta
+    return MultivariateBetaDistribution,
 
 
 @app.cell
@@ -163,51 +232,50 @@ def __(
             for t in self.buffer:
                 if not t.successful:
                     continue
-                result += cand.likelihood(t.params) / self.dist.likelihood(t.params)
+                result += cand.likelihood(t.params) / self.dist.likelihood(
+                    t.params
+                )
             return result / len(self.buffer)
 
         def _find_feasable_dist(self) -> MultivariateGaussianDistribution:
-                # Equation (6)
-                constraint = scipy.optimize.NonlinearConstraint(
-                    fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
-                    lb=0,
-                    ub=self.kl_bound,
-                )
-                res = minimize(
-                    fun=lambda x: -self._estimate_success(
-                        self.dist.with_params(x)
-                    ),
-                    x0=self.dist.get_params(),
-                    constraints=[constraint],
-                )
-                return self.dist.with_params(res.x)
+            # Equation (6)
+            constraint = scipy.optimize.NonlinearConstraint(
+                fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
+                lb=0,
+                ub=self.kl_bound,
+            )
+            res = minimize(
+                fun=lambda x: -self._estimate_success(self.dist.with_params(x)),
+                x0=self.dist.get_params(),
+                constraints=[constraint],
+            )
+            return self.dist.with_params(res.x)
 
         def _find_max_entropy_dist(self) -> MultivariateGaussianDistribution:
             # Equation (5)
             kl_constraint = scipy.optimize.NonlinearConstraint(
-                    fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
-                    lb=0,
-                    ub=self.kl_bound,
-                )
+                fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
+                lb=0,
+                ub=self.kl_bound,
+            )
             success_constraint = scipy.optimize.NonlinearConstraint(
-                    fun=lambda x: self._estimate_success(self.dist.with_params(x)),
-                    lb=self.target_success_rate,
-                    ub=1,
+                fun=lambda x: self._estimate_success(self.dist.with_params(x)),
+                lb=self.target_success_rate,
+                ub=1,
             )
             res = minimize(
                 fun=lambda x: -self.dist.with_params(x).entropy(),
                 x0=self.dist.get_params(),
-                constraints=[success_constraint, kl_constraint]
-                
+                constraints=[success_constraint, kl_constraint],
             )
             return self.dist.with_params(res.x)
-            
+
         def update_dist(self):
             # Implement "Dynamics distribution update" of Algorithm 1 lines 7-14,
             # updating self.dist in-place
             if len(self.buffer) < self.k:
                 return
-            
+
             if (
                 np.mean([t.successful for t in self.buffer])
                 < self.target_success_rate
@@ -218,53 +286,56 @@ def __(
                     return
                 self.dist = cand
             self.dist = self._find_max_entropy_dist()
-            
-            
-
-            
     return Doraemon, Trajectory
 
 
 @app.cell
-def __(Doraemon, MultivariateGaussianDistribution):
-    dist = MultivariateGaussianDistribution([.5, 2], ["x", "y"])
-    d = Doraemon(dist, 100, 0.01, 0.9)
+def __(
+    Doraemon,
+    MultivariateBetaDistribution,
+    MultivariateGaussianDistribution,
+):
+    dist = MultivariateGaussianDistribution([0.5, 2], ["x", "y"])
+    dist = MultivariateBetaDistribution([10, 10], names=["x", "y"], low=[-5,-5], high=[5,5])
+
+    d = Doraemon(dist, 100, 0.1, 0.9)
     return d, dist
 
 
 @app.cell
 def __(d, np):
     params = []
-    successes = []
+    samples = []
     N = 10000
     for i in range(N):
         sample = d.dist.sample()
         success = all(np.abs(sample) < [5, 1])
         d.add_trajectory(sample, success)
-        params.append(sample.copy())
-
-        #params.append(d.dist.get_params())
-        #successes.append(d._estimate_success(d.dist))
+        samples.append(sample.copy())
+        params.append(d.dist.get_params())
+        # successes.append(d._estimate_success(d.dist))
         if i > 100 and not i % 100:
             d.update_dist()
-    return N, i, params, sample, success, successes
+    params = np.array(params)
+    samples = np.array(samples)
+    return N, i, params, sample, samples, success
 
 
 @app.cell
 def __(N, np, params, plt):
-    params_ = np.array(params)
     fig, ax = plt.subplots()
-    ax.scatter(np.arange(N), params_[:,0], label="x", alpha=.1)
-    ax.scatter(np.arange(N), params_[:,1], label="y", alpha=.1)
-    #ax.plot(success, label="success")
+    ax.scatter(np.arange(N), params[:, 0], label="x", alpha=0.1)
+    ax.scatter(np.arange(N), params[:, 1], label="y", alpha=0.1)
+    #ax.scatter(np.arange(N), samples[:, 0], label="x", alpha=0.1)
+    #ax.scatter(np.arange(N), samples[:, 1], label="y", alpha=0.1)
+    # ax.plot(success, label="success")
     fig.legend()
-
-    return ax, fig, params_
+    return ax, fig
 
 
 @app.cell
-def __(params_):
-    params_.shape
+def __(d):
+    d.update_dist()
     return
 
 
