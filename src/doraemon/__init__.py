@@ -1,2 +1,1 @@
-def hello():
-    return "Hello from doraemon!"
+from .main import MultivariateBetaDistribution, MultivariateGaussianDistribution, Doraemon
