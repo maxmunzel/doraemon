@@ -1,1 +1,5 @@
-from .main import MultivariateBetaDistribution, MultivariateGaussianDistribution, Doraemon
+from .main import (
+    MultivariateBetaDistribution,
+    MultivariateGaussianDistribution,
+    Doraemon,
+)

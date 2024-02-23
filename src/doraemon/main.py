@@ -1,7 +1,7 @@
 import numpy as np
 import scipy
 import matplotlib.pyplot as plt
-from typing import NamedTuple, List, Deque, Dict
+from typing import NamedTuple, List, Deque, Dict, Tuple
 from scipy.optimize import minimize
 from collections import deque
 from copy import deepcopy
@@ -30,8 +30,9 @@ class MultivariateGaussianDistribution:
         samples = self.random.normal(self.means, self.stds)
         return samples
 
-    def sample_dict(self) -> Dict[str, float]:
-        return {k: v for k, v in zip(self.names, self.sample())}
+    def sample_dict(self) -> Tuple[np.ndarray, Dict[str, float]]:
+        sample = self.sample()
+        return sample, {k: v for k, v in zip(self.names, sample)}
 
     def likelihood(self, sample):
         likelihoods = norm.pdf(sample, self.means, self.stds)
@@ -105,8 +106,9 @@ class MultivariateBetaDistribution:
 
         return low + (high - low) * samples
 
-    def sample_dict(self) -> Dict[str, float]:
-        return {name: value for name, value in zip(self.names, self.sample())}
+    def sample_dict(self) -> Tuple[np.ndarray, Dict[str, float]]:
+        sample = self.sample()
+        return sample, {k: v for k, v in zip(self.names, sample)}
 
     def likelihood(self, sample: List[float]) -> float:
         high = self.high
