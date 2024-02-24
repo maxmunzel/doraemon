@@ -6,6 +6,9 @@ from scipy.optimize import minimize
 from collections import deque
 from copy import deepcopy
 from scipy.stats import beta, norm
+from scipy.special import psi
+import math
+from math import gamma
 
 
 class MultivariateGaussianDistribution:
@@ -124,8 +127,20 @@ class MultivariateBetaDistribution:
         return np.sum(entropies)
 
     def kl_dist(self, other) -> float:
-        # TODO: find an actual way to compute this
-        return np.linalg.norm(self.get_params() - other.get_params())
+        # formula from https://math.stackexchange.com/questions/257821/kullback-liebler-divergence#comment564291_257821,
+        # verified against numerical integration (at least for our alpha == beta case)
+
+        res = 0
+        for f, g in zip(self.get_params(), other.get_params()):
+            try:
+                res += np.log(
+                    (gamma(f + f) * gamma(g) ** 2) / (gamma(g + g) * gamma(f) ** 2)
+                )
+                res += 2 * (f - g) * (psi(f) - psi(f + f))
+            except ArithmeticError:
+                res += 1
+
+        return res
 
     def get_params(self) -> np.ndarray:
         return self.alphas.copy()
@@ -228,24 +243,22 @@ if __name__ == "__main__":
     d = Doraemon(dist, 100, 0.1, 0.9)
     params = []
     samples = []
-    N = 1000
+    N = 10000
     for i in range(N):
         sample = d.dist.sample()
         success = all(np.abs(sample) < [5, 1])
         d.add_trajectory(sample, success)
         samples.append(sample.copy())
         params.append(d.dist.get_params())
-        # successes.append(d._estimate_success(d.dist))
-        if i > 100 and not i % 100:
-            d.update_dist()
+        d.update_dist()
     params = np.array(params)
     samples = np.array(samples)
 
     fig, ax = plt.subplots()
-    ax.scatter(np.arange(N), params[:, 0], label="x", alpha=0.1)
-    ax.scatter(np.arange(N), params[:, 1], label="y", alpha=0.1)
-    # ax.scatter(np.arange(N), samples[:, 0], label="x", alpha=0.1)
-    # ax.scatter(np.arange(N), samples[:, 1], label="y", alpha=0.1)
+    # ax.scatter(np.arange(N), params[:, 0], label="x", alpha=0.1)
+    # ax.scatter(np.arange(N), params[:, 1], label="y", alpha=0.1)
+    ax.scatter(np.arange(N), samples[:, 0], label="x", alpha=0.1)
+    ax.scatter(np.arange(N), samples[:, 1], label="y", alpha=0.1)
     # ax.plot(success, label="success")
     fig.legend()
     plt.show()
