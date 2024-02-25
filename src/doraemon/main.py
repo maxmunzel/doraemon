@@ -195,7 +195,10 @@ class Doraemon:
             x0=self.dist.get_params(),
             constraints=[constraint],
         )
-        return self.dist.with_params(res.x)
+        if res.success:
+            return self.dist.with_params(res.x)
+        else:
+            return self.dist
 
     def _find_max_entropy_dist(self) -> MultivariateGaussianDistribution:
         # Equation (5)
@@ -214,7 +217,10 @@ class Doraemon:
             x0=self.dist.get_params(),
             constraints=[success_constraint, kl_constraint],
         )
-        return self.dist.with_params(res.x)
+        if res.success:
+            return self.dist.with_params(res.x)
+        else:
+            return self.dist
 
     def update_dist(self):
         # Implement "Dynamics distribution update" of Algorithm 1 lines 7-14,
