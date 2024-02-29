@@ -2,7 +2,7 @@ import numpy as np
 import scipy
 import matplotlib.pyplot as plt
 from typing import NamedTuple, List, Deque, Dict, Tuple
-from scipy.optimize import minimize
+from scipy.optimize import minimize, NonlinearConstraint
 from collections import deque
 from copy import deepcopy
 from scipy.stats import beta, norm
@@ -12,8 +12,16 @@ from math import gamma
 
 
 class MultivariateGaussianDistribution:
-    def __init__(self, stds: List[float], names: List[str], means=None, seed=42):
+    def __init__(
+        self,
+        stds: List[float],
+        param_bound: List[float],
+        names: List[str],
+        means=None,
+        seed=42,
+    ):
         self.stds = np.array(stds)
+        self.param_bound = param_bound
         self.names = names
         assert len(stds) == len(names)
         if means is not None:
@@ -82,6 +90,7 @@ class MultivariateBetaDistribution:
         alphas: List[float],
         low: List[float],
         high: List[float],
+        param_bound: List[float],
         names: List[str],
         seed=42,
     ):
@@ -89,6 +98,7 @@ class MultivariateBetaDistribution:
         self.high = np.array(high)
         self.alphas = np.array(alphas)
         self.betas = self.alphas  # Since alpha == beta
+        self.param_bound = param_bound
         self.names = names
         assert len(alphas) == len(names) == len(low) == len(high)
         self.random = np.random.default_rng(seed)
@@ -174,7 +184,18 @@ class Doraemon:
         self.n_traj += 1
         self.buffer.append(Trajectory(params, successful))
 
+    def param_dict(self) -> Dict[str, float]:
+        res = {
+            f"doramon_{k}": v for k, v in zip(self.dist.names, self.dist.get_params())
+        }
+        res["doramon_naive_success_rate"] = self._naive_success_rate()
+        res["doramon_estimated_success"] = self._estimate_success(self.dist)
+        res["doramon_entropy"] = self.dist.entropy()
+        return res
+
     def _estimate_success(self, cand: MultivariateGaussianDistribution) -> float:
+        if not self.buffer:
+            return 0
         # Importance sampling according to equation (5)
         result = 0
         for t in self.buffer:
@@ -185,37 +206,51 @@ class Doraemon:
 
     def _find_feasable_dist(self) -> MultivariateGaussianDistribution:
         # Equation (6)
-        constraint = scipy.optimize.NonlinearConstraint(
+        kl_constraint = NonlinearConstraint(
             fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
             lb=0,
             ub=self.kl_bound,
         )
+
+        param_bounds = [(None, bound) for bound in self.dist.param_bound]
+
         res = minimize(
             fun=lambda x: -self._estimate_success(self.dist.with_params(x)),
             x0=self.dist.get_params(),
-            constraints=[constraint],
+            constraints=[kl_constraint],
+            bounds=param_bounds,
         )
         if res.success:
             return self.dist.with_params(res.x)
         else:
             return self.dist
 
+    def _naive_success_rate(self) -> float:
+        if not self.buffer:
+            return 0
+        return np.mean([t.successful for t in self.buffer])
+
     def _find_max_entropy_dist(self) -> MultivariateGaussianDistribution:
         # Equation (5)
-        kl_constraint = scipy.optimize.NonlinearConstraint(
+        kl_constraint = NonlinearConstraint(
             fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
             lb=0,
             ub=self.kl_bound,
         )
-        success_constraint = scipy.optimize.NonlinearConstraint(
+        success_constraint = NonlinearConstraint(
             fun=lambda x: self._estimate_success(self.dist.with_params(x)),
             lb=self.target_success_rate,
             ub=1,
         )
+
+        param_bounds = [(1, bound) for bound in self.dist.param_bound]
+
         res = minimize(
             fun=lambda x: -self.dist.with_params(x).entropy(),
             x0=self.dist.get_params(),
             constraints=[success_constraint, kl_constraint],
+            bounds=param_bounds,
+            method="trust-constr",
         )
         if res.success:
             return self.dist.with_params(res.x)
@@ -231,7 +266,7 @@ class Doraemon:
         if self.n_traj % self.k != 0:
             return
 
-        if np.mean([t.successful for t in self.buffer]) < self.target_success_rate:
+        if self._estimate_success(self.dist) < self.target_success_rate:
             cand = self._find_feasable_dist()
             if self._estimate_success(cand) < self.target_success_rate:
                 self.dist = cand
