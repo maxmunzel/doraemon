@@ -212,7 +212,7 @@ class Doraemon:
             ub=self.kl_bound,
         )
 
-        param_bounds = [(None, bound) for bound in self.dist.param_bound]
+        param_bounds = [(1, bound) for bound in self.dist.param_bound]
 
         res = minimize(
             fun=lambda x: -self._estimate_success(self.dist.with_params(x)),
