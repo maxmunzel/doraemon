@@ -25,6 +25,31 @@ def test_doraemon_param_dict(beta_distribution):
         float(v)
 
 
+def test_alphas_stay_above_one():
+    dist = MultivariateBetaDistribution(
+        alphas=[2],
+        names=["x"],
+        low=[-5],
+        high=[5],
+        param_bound=[10],
+        seed=42,
+    )
+    d = Doraemon(
+        dist=dist,
+        k=10,
+        kl_bound=0.1,
+        target_success_rate=0.2,
+    )
+    N = 400
+    start_entropy = d.dist.entropy()
+    for i in range(N):
+        sample = d.dist.sample()
+        d.add_trajectory(list(sample), True)
+        d.update_dist()
+        assert np.all(d.dist.get_params() >= 1)
+    assert d.dist.entropy() > start_entropy
+
+
 def test_doraemon_updates_increasing_entropy():
     # test if the entropy grows in the face of success
     dist = MultivariateBetaDistribution(
@@ -53,6 +78,7 @@ def test_doraemon_updates_increasing_entropy():
         d.update_dist()
         assert dist.with_params(old_params).kl_dist(d.dist) <= d.kl_bound * 1.01
         assert np.all(d.dist.get_params() <= d.dist.param_bound)
+        assert np.all(d.dist.get_params() >= 1)
     assert d.dist.entropy() > start_entropy
 
 
@@ -82,4 +108,5 @@ def test_doraemon_updates_decreasing_entropy():
         d.update_dist()
         assert dist.with_params(old_params).kl_dist(d.dist) <= d.kl_bound * 1.01
         assert np.all(d.dist.get_params() <= d.dist.param_bound)
+        assert np.all(d.dist.get_params() >= 1)
     assert d.dist.entropy() < start_entropy
