@@ -16,6 +16,22 @@ def beta_distribution():
     return dist
 
 
+def test_equal_bounds():
+    """Setting low=high should be supported for convenience"""
+    dist = MultivariateBetaDistribution(
+        alphas=[10, 10],
+        names=["x", "y"],
+        low=[5, -5],
+        high=[5, 5],
+        param_bound=[10, 10],
+    )
+    x, y = dist.sample()
+    assert abs(x - 5) < 0.001
+
+    L = dist.likelihood(np.array([5, 0]))
+    assert np.isfinite(L)
+
+
 def test_doraemon_param_dict(beta_distribution):
     d = Doraemon(dist=beta_distribution, k=100, kl_bound=0.1, target_success_rate=0.9)
     res = d.param_dict()

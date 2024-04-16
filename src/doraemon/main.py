@@ -126,7 +126,8 @@ class MultivariateBetaDistribution:
     def likelihood(self, sample: List[float]) -> float:
         high = self.high
         low = self.low
-        sample = (sample - low) / (high - low)
+        mask = 1 * (low == high)  # ignore fields with no variance
+        sample = (sample - low + mask) / (high - low + mask)
         likelihoods = [
             beta.pdf(x, a, b) for x, a, b in zip(sample, self.alphas, self.betas)
         ]
