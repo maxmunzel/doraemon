@@ -1,87 +1,12 @@
 import numpy as np
-import scipy
 import matplotlib.pyplot as plt
 from typing import NamedTuple, List, Deque, Dict, Tuple
 from scipy.optimize import minimize, NonlinearConstraint
 from collections import deque
 from copy import deepcopy
-from scipy.stats import beta, norm
+from scipy.stats import beta
 from scipy.special import psi
-import math
 from math import gamma
-
-
-class MultivariateGaussianDistribution:
-    def __init__(
-        self,
-        stds: List[float],
-        param_bound: List[float],
-        names: List[str],
-        means=None,
-        seed=42,
-    ):
-        self.stds = np.array(stds)
-        self.param_bound = param_bound
-        self.names = names
-        assert len(stds) == len(names)
-        if means is not None:
-            self.means = np.array(means)
-        else:
-            self.means = np.zeros_like(stds)
-        self.random = np.random.default_rng(seed)
-
-    def with_params(self, stds: List[float], seed=42):
-        stds = np.array(stds)
-        assert stds.shape == self.stds.shape
-        res = deepcopy(self)
-        res.set_params(stds)
-        return res
-
-    def sample(self):
-        samples = self.random.normal(self.means, self.stds)
-        return samples
-
-    def sample_dict(self) -> Tuple[np.ndarray, Dict[str, float]]:
-        sample = self.sample()
-        return sample, {k: v for k, v in zip(self.names, sample)}
-
-    def likelihood(self, sample):
-        likelihoods = norm.pdf(sample, self.means, self.stds)
-        return np.prod(likelihoods)
-
-    def entropy(self):
-        entropies = norm.entropy(self.means, self.stds)
-        return np.sum(entropies)
-
-    def get_params(self):
-        return self.stds.copy()
-
-    def set_params(self, stds):
-        self.stds = stds.copy()
-
-    def kl_dist(self, other):
-        k = len(self.means)
-        Sigma0 = np.diag(self.stds**2)
-        Sigma1 = np.diag(other.stds**2)
-
-        Sigma1_Inv = np.linalg.inv(Sigma1)
-
-        mu0 = self.means
-        mu1 = other.means
-
-        det = np.linalg.det
-        tr = np.trace
-        ln = np.log
-
-        kl_div = (
-            tr(Sigma1_Inv @ Sigma0)
-            - k
-            + (mu1 - mu0).T @ Sigma1_Inv @ (mu1 - mu0)
-            + ln(det(Sigma1) / det(Sigma0))
-        )
-        kl_div /= 2
-
-        return kl_div
 
 
 class MultivariateBetaDistribution:
@@ -103,7 +28,7 @@ class MultivariateBetaDistribution:
         assert len(alphas) == len(names) == len(low) == len(high)
         self.random = np.random.default_rng(seed)
 
-    def with_params(self, alphas: List[float], seed=42):
+    def with_params(self, alphas: List[float]):
         assert len(alphas) == len(self.alphas)
         res = deepcopy(self)
         res.set_params(alphas)
@@ -128,6 +53,8 @@ class MultivariateBetaDistribution:
         low = self.low
         mask = 1 * (low == high)  # ignore fields with no variance
         sample = (sample - low + mask) / (high - low + mask)
+        eps = 0.001
+        sample = np.clip(sample, eps, 1 - eps)
         likelihoods = [
             beta.pdf(x, a, b) for x, a, b in zip(sample, self.alphas, self.betas)
         ]
@@ -154,10 +81,14 @@ class MultivariateBetaDistribution:
         return res
 
     def get_params(self) -> np.ndarray:
-        return self.alphas.copy()
+        alphas = np.nan_to_num(self.alphas, nan=np.inf)
+        alphas = np.clip(alphas, np.ones_like(alphas), self.param_bound)
+        return alphas.copy()
 
     def set_params(self, alphas: List[float]):
-        self.alphas = np.array(alphas)
+        alphas = np.array(alphas).copy()
+        alphas = np.clip(alphas, np.ones_like(alphas), self.param_bound)
+        self.alphas = alphas
         self.betas = np.array(alphas)  # Update betas as well since alpha == beta
 
 
@@ -169,7 +100,7 @@ class Trajectory(NamedTuple):
 class Doraemon:
     def __init__(
         self,
-        dist: MultivariateGaussianDistribution,
+        dist: MultivariateBetaDistribution,
         k: int,
         kl_bound: float,
         target_success_rate: float,
@@ -194,7 +125,7 @@ class Doraemon:
         res["doramon_entropy"] = self.dist.entropy()
         return res
 
-    def _estimate_success(self, cand: MultivariateGaussianDistribution) -> float:
+    def _estimate_success(self, cand: MultivariateBetaDistribution) -> float:
         if not self.buffer:
             return 0
         # Importance sampling according to equation (5)
@@ -205,7 +136,7 @@ class Doraemon:
             result += cand.likelihood(t.params) / self.dist.likelihood(t.params)
         return result / len(self.buffer)
 
-    def _find_feasable_dist(self) -> MultivariateGaussianDistribution:
+    def _find_feasable_dist(self) -> MultivariateBetaDistribution:
         # Equation (6)
         kl_constraint = NonlinearConstraint(
             fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
@@ -231,7 +162,7 @@ class Doraemon:
             return 0
         return np.mean([t.successful for t in self.buffer])
 
-    def _find_max_entropy_dist(self) -> MultivariateGaussianDistribution:
+    def _find_max_entropy_dist(self) -> MultivariateBetaDistribution:
         # Equation (5)
         kl_constraint = NonlinearConstraint(
             fun=lambda x: self.dist.kl_dist(self.dist.with_params(x)),
@@ -277,7 +208,7 @@ class Doraemon:
 
 
 if __name__ == "__main__":
-    dist = MultivariateGaussianDistribution([0.5, 2], ["x", "y"])
+    dist = MultivariateBetaDistribution([0.5, 2], ["x", "y"])
     dist = MultivariateBetaDistribution(
         [10, 10], names=["x", "y"], low=[-5, -5], high=[5, 5]
     )

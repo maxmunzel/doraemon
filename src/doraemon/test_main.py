@@ -16,6 +16,63 @@ def beta_distribution():
     return dist
 
 
+def test_out_of_bounds_params():
+    """Dist params may be a little bit away from the limits due to floating point errors. We need to handle this gracefully."""
+    dist = MultivariateBetaDistribution(
+        alphas=[10, 10],
+        names=["x", "y"],
+        low=[5, -5],
+        high=[5, 5],
+        param_bound=[10, 10],
+    )
+    d = Doraemon(dist=dist, k=100, kl_bound=0.1, target_success_rate=0.9)
+
+    for i in range(301):
+        sample = dist.sample()
+        d.add_trajectory(sample, 0 == i % 2)
+        d.update_dist()
+        L = dist.likelihood(sample)
+        assert np.isfinite(L)
+        assert np.all(np.isfinite(dist.sample()))
+        assert np.all(np.isfinite(dist.get_params()))
+        params = dist.get_params()
+        if i % 6 == 0:
+            params[0] = 0.9
+        elif i % 6 == 1:
+            params[0] = 11
+        elif i % 6 == 2:
+            params[0] == 0
+        elif i % 6 == 3:
+            params[0] == np.inf
+        elif i % 6 == 4:
+            params[0] == -np.inf
+        elif i % 6 == 5:
+            params[0] == np.nan
+
+        dist.set_params(params)
+
+
+def test_out_of_bounds_likelihood():
+    """Samples may be a little bit away from the distribution due to floating point errors. We need to handle this gracefully."""
+    dist = MultivariateBetaDistribution(
+        alphas=[10, 10],
+        names=["x", "y"],
+        low=[5, -5],
+        high=[5, 5],
+        param_bound=[10, 10],
+    )
+    d = Doraemon(dist=dist, k=100, kl_bound=0.1, target_success_rate=0.9)
+
+    for i, eps in enumerate(np.linspace(0, 0.1, 1000)):
+        sample = [5 + eps, -5 - eps]
+        d.add_trajectory(sample, 0 == i % 2)
+        d.update_dist()
+        L = dist.likelihood(sample)
+        assert np.isfinite(L)
+        assert np.all(np.isfinite(dist.sample()))
+        assert np.all(np.isfinite(dist.get_params()))
+
+
 def test_equal_bounds():
     """Setting low=high should be supported for convenience"""
     dist = MultivariateBetaDistribution(
