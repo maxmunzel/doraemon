@@ -137,16 +137,14 @@ def test_doraemon_updates_increasing_entropy():
         dist=dist,
         k=100,
         kl_bound=0.1,
-        target_success_rate=0.9,
+        target_success_rate=0.1,
     )
-    N = 200
+    N = 201
     start_entropy = d.dist.entropy()
     for i in range(N):
         sample = d.dist.sample()
-        d.add_trajectory(list(sample), True)  # everything is successful
-        if i == 199:
-            pass
-            # breakpoint()
+        success = max(abs(sample)) < 1
+        d.add_trajectory(list(sample), success)
         old_params = d.dist.get_params()
         d.update_dist()
         assert dist.with_params(old_params).kl_dist(d.dist) <= d.kl_bound * 1.01
@@ -171,12 +169,12 @@ def test_doraemon_updates_decreasing_entropy():
         kl_bound=0.1,
         target_success_rate=0.9,
     )
-    N = 200
+    N = 201
     start_entropy = d.dist.entropy()
     for i in range(N):
         sample = d.dist.sample()
         success = max(abs(sample)) < 3
-        d.add_trajectory(list(sample), success)  # everything fails
+        d.add_trajectory(list(sample), success)
         old_params = d.dist.get_params()
         d.update_dist()
         assert dist.with_params(old_params).kl_dist(d.dist) <= d.kl_bound * 1.01

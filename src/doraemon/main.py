@@ -87,9 +87,10 @@ class MultivariateBetaDistribution:
 
     def set_params(self, alphas: List[float]):
         alphas = np.array(alphas).copy()
+        alphas = np.nan_to_num(alphas, nan=np.inf)
         alphas = np.clip(alphas, np.ones_like(alphas), self.param_bound)
         self.alphas = alphas
-        self.betas = np.array(alphas)  # Update betas as well since alpha == beta
+        self.betas = alphas  # Update betas as well since alpha == beta
 
 
 class Trajectory(NamedTuple):
@@ -152,7 +153,12 @@ class Doraemon:
             constraints=[kl_constraint],
             bounds=param_bounds,
         )
-        if res.success:
+        if (
+            res.success
+            and np.all(np.isfinite(res.x))
+            and np.all(1 <= res.x)
+            and np.all(res.x <= self.dist.param_bound)
+        ):
             return self.dist.with_params(res.x)
         else:
             return self.dist
@@ -184,7 +190,12 @@ class Doraemon:
             bounds=param_bounds,
             method="trust-constr",
         )
-        if res.success:
+        if (
+            res.success
+            and np.all(np.isfinite(res.x))
+            and np.all(1 <= res.x)
+            and np.all(res.x <= self.dist.param_bound)
+        ):
             return self.dist.with_params(res.x)
         else:
             return self.dist
